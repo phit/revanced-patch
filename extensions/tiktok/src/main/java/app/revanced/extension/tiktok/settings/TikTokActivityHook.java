@@ -68,7 +68,7 @@ public class TikTokActivityHook {
         return true;
     }
 
-    private static void startSettingsActivity() {
+    public static void startSettingsActivity() {
         Context appContext = Utils.getContext();
         if (appContext != null) {
             Intent intent = new Intent(appContext, AdPersonalizationActivity.class);
