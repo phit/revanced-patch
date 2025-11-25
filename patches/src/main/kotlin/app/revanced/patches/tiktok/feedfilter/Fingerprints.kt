@@ -11,9 +11,12 @@ internal val feedApiServiceLIZFingerprint = fingerprint {
 
 internal val getFollowFeedFingerprint = fingerprint {
     returns("Lcom/ss/android/ugc/aweme/follow/presenter/FollowFeedList;")
-    opcodes(
-        Opcode.INVOKE_INTERFACE_RANGE,
-        Opcode.MOVE_RESULT_OBJECT,
-        Opcode.INVOKE_INTERFACE
+    strings(
+        "userAvatarShrink",
+        "adUserAgent",
+        "cmplEnc",
+        "gaid",
+        "lastShowLives",
+        "following"
     )
 }
