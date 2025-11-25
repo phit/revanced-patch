@@ -26,8 +26,8 @@ val sanitizeShareUrlsPatch = bytecodePatch(
     dependsOn(sharedExtensionPatch)
 
     compatibleWith(
-        "com.ss.android.ugc.trill"("36.5.4"),
-        "com.zhiliaoapp.musically"("36.5.4"),
+        "com.ss.android.ugc.trill"("42.6.4"),
+        "com.zhiliaoapp.musically"("42.6.4"),
     )
 
     execute {

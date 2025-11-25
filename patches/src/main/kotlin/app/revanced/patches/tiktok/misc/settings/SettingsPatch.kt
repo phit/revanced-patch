@@ -21,8 +21,8 @@ val settingsPatch = bytecodePatch(
     dependsOn(sharedExtensionPatch, addBrandLicensePatch)
 
     compatibleWith(
-        "com.ss.android.ugc.trill"("39.8.1"),
-        "com.zhiliaoapp.musically"("39.8.1"),
+        "com.ss.android.ugc.trill"("42.6.4"),
+        "com.zhiliaoapp.musically"("42.6.4"),
     )
 
     execute {
@@ -38,7 +38,8 @@ val settingsPatch = bytecodePatch(
             val instructionAfterInvokeSuper = getInstruction(invokeSuperIndex + 1)
 
             val thisRegister = getInstruction<FiveRegisterInstruction>(invokeSuperIndex).registerC
-            val freeRegister = findFreeRegister(invokeSuperIndex)
+            // Find a free register starting after INVOKE_SUPER and excluding the 'this' register.
+            val freeRegister = findFreeRegister(invokeSuperIndex + 1, thisRegister)
 
             addInstructionsWithLabels(
                 invokeSuperIndex + 1,
