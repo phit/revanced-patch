@@ -22,15 +22,15 @@ val settingsPatch = bytecodePatch(
     dependsOn(sharedExtensionPatch, addBrandLicensePatch)
 
     compatibleWith(
-        "com.ss.android.ugc.trill"("36.5.4"),
-        "com.zhiliaoapp.musically"("36.5.4"),
+        "com.ss.android.ugc.trill"("42.6.4"),
+        "com.zhiliaoapp.musically"("42.6.4"),
     )
 
     execute {
+        val adPersonalizationActivityClassName =
+            "Lcom/bytedance/ies/ugc/aweme/commercialize/compliance/personalization/AdPersonalizationActivity;"
         val initializeSettingsMethodDescriptor =
-            "$EXTENSION_CLASS_DESCRIPTOR->initialize(" +
-                "Lcom/bytedance/ies/ugc/aweme/commercialize/compliance/personalization/AdPersonalizationActivity;" +
-                ")Z"
+            "$EXTENSION_CLASS_DESCRIPTOR->initialize($adPersonalizationActivityClassName)Z"
 
         val createSettingsEntryMethodDescriptor =
             "$EXTENSION_CLASS_DESCRIPTOR->createSettingsEntry(" +
@@ -40,57 +40,55 @@ val settingsPatch = bytecodePatch(
 
         fun String.toClassName(): String = substring(1, this.length - 1).replace("/", ".")
 
-        // Find the class name of classes which construct a settings entry
-        val settingsButtonClass = settingsEntryFingerprint.originalClassDef.type.toClassName()
-        val settingsButtonInfoClass = settingsEntryInfoFingerprint.originalClassDef.type.toClassName()
+        // New entry class & wrapper based on updated fingerprints.
+        val settingsItemClass = settingsEntryItemFingerprint.originalClassDef.type.toClassName()
+        val settingsWrapperClass = settingsEntryWrapperFingerprint.originalClassDef.type.toClassName()
 
-        // Create a settings entry for 'revanced settings' and add it to settings fragment
-        addSettingsEntryFingerprint.method.apply {
-            val markIndex = implementation!!.instructions.indexOfFirst {
-                it.opcode == Opcode.IGET_OBJECT && ((it as Instruction22c).reference as FieldReference).name == "headerUnit"
+        // Inject into SupportPage.onViewCreated: locate first invoke to LIZ on LX/0k7r and insert before it.
+        supportPageOnViewCreatedFingerprint.method.apply {
+            val impl = implementation!!
+            val addUnitIndex = impl.instructions.indexOfFirst { ins ->
+                if (ins.opcode != Opcode.INVOKE_VIRTUAL) return@indexOfFirst false
+                val invoke = ins as Instruction35c
+                val methodRef = invoke.reference
+                val methodString = methodRef.toString()
+                methodString.contains("->LIZ(") && methodString.contains("LX/0k7r;")
             }
+            if (addUnitIndex == -1) error("Could not find invoke to LIZ on LX/0k7r in SupportPage.onViewCreated")
 
-            val getUnitManager = getInstruction(markIndex + 2)
-            val addEntry = getInstruction(markIndex + 1)
-
-            addInstructions(
-                markIndex + 2,
-                listOf(
-                    getUnitManager,
-                    addEntry,
-                ),
-            )
+            // Retrieve manager register from original invoke (first register of Instruction35c is registerC)
+            val originalInvoke = getInstruction<Instruction35c>(addUnitIndex)
+            val managerRegister = originalInvoke.registerC
 
             addInstructions(
-                markIndex + 2,
+                addUnitIndex,
                 """
-                    const-string v0, "$settingsButtonClass"
-                    const-string v1, "$settingsButtonInfoClass"
+                    # ReVanced settings injection
+                    const-string v0, "$settingsItemClass"
+                    const-string v1, "$settingsWrapperClass"
                     invoke-static {v0, v1}, $createSettingsEntryMethodDescriptor
                     move-result-object v0
-                    check-cast v0, ${settingsEntryFingerprint.originalClassDef.type}
+                    new-instance v1, ${settingsEntryWrapperFingerprint.originalClassDef.type}
+                    invoke-direct {v1, v0}, ${settingsEntryWrapperFingerprint.originalClassDef.type}-><init>(${settingsEntryItemFingerprint.originalClassDef.type})V
+                    invoke-virtual {v$managerRegister, v1}, LX/0k7r;->LIZ(LX/0k7p;)V
                 """,
             )
         }
 
         // Initialize the settings menu once the replaced setting entry is clicked.
         adPersonalizationActivityOnCreateFingerprint.method.apply {
-            val initializeSettingsIndex = implementation!!.instructions.indexOfFirst {
-                it.opcode == Opcode.INVOKE_SUPER
-            } + 1
-
+            val initializeSettingsIndex = implementation!!.instructions.indexOfFirst { it.opcode == Opcode.INVOKE_SUPER } + 1
             val thisRegister = getInstruction<Instruction35c>(initializeSettingsIndex - 1).registerC
             val usableRegister = implementation!!.registerCount - parameters.size - 2
-
             addInstructionsWithLabels(
                 initializeSettingsIndex,
                 """
                     invoke-static {v$thisRegister}, $initializeSettingsMethodDescriptor
                     move-result v$usableRegister
-                    if-eqz v$usableRegister, :do_not_open
+                    if-eqz v$usableRegister, :skip_opening_revanced_settings
                     return-void
                 """,
-                ExternalLabel("do_not_open", getInstruction(initializeSettingsIndex)),
+                ExternalLabel("skip_opening_revanced_settings", getInstruction(initializeSettingsIndex)),
             )
         }
     }

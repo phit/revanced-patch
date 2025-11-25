@@ -2,6 +2,7 @@ package app.revanced.patches.tiktok.interaction.speed
 
 import app.revanced.patcher.extensions.InstructionExtensions.addInstruction
 import app.revanced.patcher.extensions.InstructionExtensions.addInstructions
+import app.revanced.patcher.extensions.InstructionExtensions.addInstructionsWithLabels
 import app.revanced.patcher.extensions.InstructionExtensions.getInstruction
 import app.revanced.patcher.patch.bytecodePatch
 import app.revanced.patches.tiktok.shared.getEnterFromFingerprint
@@ -18,47 +19,45 @@ val playbackSpeedPatch = bytecodePatch(
         "retains the speed configurations in between videos.",
 ) {
     compatibleWith(
-        "com.ss.android.ugc.trill"("36.5.4"),
-        "com.zhiliaoapp.musically"("36.5.4"),
+        "com.ss.android.ugc.trill"("42.6.4"),
+        "com.zhiliaoapp.musically"("42.6.4"),
     )
 
     execute {
-        setSpeedFingerprint.let { onVideoSwiped ->
-            getSpeedFingerprint.method.apply {
-                val injectIndex =
-                    indexOfFirstInstructionOrThrow { getReference<MethodReference>()?.returnType == "F" } + 2
-                val register = getInstruction<Instruction11x>(injectIndex - 1).registerA
-
+        setSpeedFingerprint.let { speedEventFingerprint ->
+            // Remember speed after it is applied in the event method.
+            speedEventFingerprint.method.apply {
+                val applyIndex = indexOfFirstInstructionOrThrow {
+                    val ref = getReference<MethodReference>()
+                    ref?.definingClass == "LX/0NgW;" && ref.parameterTypes.size == 1 && ref.parameterTypes[0] == "F" && ref.returnType == "V"
+                }
+                // Determine speed register dynamically by parsing the invoke instruction text.
+                val invokeInstr = getInstruction(applyIndex)
+                val speedRegToken = Regex("\\{([^}]*)}").find(invokeInstr.toString())?.groupValues?.get(1)
+                    ?.split(',')?.map { it.trim() }?.lastOrNull() ?: "p1" // fallback to method param
+                // Normalize register form for injection: keep as-is (may be pX or vX)
                 addInstruction(
-                    injectIndex,
-                    "invoke-static { v$register }," +
-                        " Lapp/revanced/extension/tiktok/speed/PlaybackSpeedPatch;->rememberPlaybackSpeed(F)V",
+                    applyIndex + 1,
+                    "invoke-static { $speedRegToken }, Lapp/revanced/extension/tiktok/speed/PlaybackSpeedPatch;->rememberPlaybackSpeed(F)V",
                 )
             }
 
-            // By default, the playback speed will reset to 1.0 at the start of each video.
-            // Instead, override it with the desired playback speed.
+            // Reapply remembered speed at start of first frame render.
             onRenderFirstFrameFingerprint.method.addInstructions(
                 0,
                 """
-                    # Video playback location (e.g. home page, following page or search result page) retrieved using getEnterFrom method.
-                    const/4 v0, 0x1
-                    invoke-virtual { p0, v0 },  ${getEnterFromFingerprint.originalMethod}
-                    move-result-object v0
-    
-                    # Model of current video retrieved using getCurrentAweme method.
-                    invoke-virtual { p0 }, Lcom/ss/android/ugc/aweme/feed/panel/BaseListFragmentPanel;->getCurrentAweme()Lcom/ss/android/ugc/aweme/feed/model/Aweme;
-                    move-result-object v1
-    
-                    # Desired playback speed retrieved using getPlaybackSpeed method.
+                    iget-object v0, p0, Lcom/ss/android/ugc/aweme/feed/panel/BaseListFragmentPanel;->LLLJ:Lcom/ss/android/ugc/aweme/feed/controller/BaseController;
+                    if-eqz v0, :skip_set_speed
                     invoke-static { }, Lapp/revanced/extension/tiktok/speed/PlaybackSpeedPatch;->getPlaybackSpeed()F
-                    move-result v2
-                    invoke-static { v0, v1, v2 }, ${onVideoSwiped.originalMethod}
+                    move-result v1
+                    # Apply speed using controller interface (method name may vary, so find dynamically is not possible in raw smali injection).
+                    invoke-interface { v0, v1 }, LX/0NgW;->LJJJIL(F)V
+                    :skip_set_speed
                 """,
             )
 
-            // Force enable the playback speed option for all videos.
-            onVideoSwiped.classDef.methods.find { method -> method.returnType == "Z" }?.addInstructions(
+            // Force enable playback speed option (if there is a boolean method we can override).
+            speedEventFingerprint.classDef.methods.find { method -> method.returnType == "Z" }?.addInstructions(
                 0,
                 """
                     const/4 v0, 0x1
